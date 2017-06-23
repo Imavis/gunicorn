@@ -20,6 +20,7 @@ import ssl
 import sys
 from threading import RLock
 import time
+from monotonic import monotonic
 
 from .. import http
 from ..http import wsgi
@@ -69,7 +70,7 @@ class TConn(object):
 
     def set_timeout(self):
         # set the timeout
-        self.timeout = time.time() + self.cfg.keepalive
+        self.timeout = monotonic() + self.cfg.keepalive
 
     def close(self):
         util.close(self.sock)
@@ -155,7 +156,7 @@ class ThreadWorker(base.Worker):
         self.enqueue_req(conn)
 
     def murder_keepalived(self):
-        now = time.time()
+        now = monotonic()
         while True:
             with self._lock:
                 try:

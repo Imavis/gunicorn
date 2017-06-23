@@ -9,6 +9,7 @@ import sys
 from datetime import datetime
 from functools import partial
 import time
+from monotonic import monotonic
 
 _socket = __import__("socket")
 
@@ -127,8 +128,8 @@ class GeventWorker(AsyncWorker):
                     server.kill()
 
             # Handle current requests until graceful_timeout
-            ts = time.time()
-            while time.time() - ts <= self.cfg.graceful_timeout:
+            ts = monotonic()
+            while monotonic() - ts <= self.cfg.graceful_timeout:
                 accepting = 0
                 for server in servers:
                     if server.pool.free_count() != server.pool.size:

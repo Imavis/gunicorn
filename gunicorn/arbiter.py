@@ -12,6 +12,7 @@ import signal
 import sys
 import time
 import traceback
+from monotonic import monotonic
 
 from gunicorn.errors import HaltServer, AppImportError
 from gunicorn.pidfile import Pidfile
@@ -373,11 +374,11 @@ class Arbiter(object):
         sig = signal.SIGTERM
         if not graceful:
             sig = signal.SIGQUIT
-        limit = time.time() + self.cfg.graceful_timeout
+        limit = monotonic() + self.cfg.graceful_timeout
         # instruct the workers to exit
         self.kill_workers(sig)
         # wait until the graceful timeout
-        while self.WORKERS and time.time() < limit:
+        while self.WORKERS and monotonic() < limit:
             time.sleep(0.1)
 
         self.kill_workers(signal.SIGKILL)
@@ -474,7 +475,7 @@ class Arbiter(object):
         workers = list(self.WORKERS.items())
         for (pid, worker) in workers:
             try:
-                if time.time() - worker.tmp.last_update() <= self.timeout:
+                if monotonic() - worker.tmp.last_update() <= self.timeout:
                     continue
             except (OSError, ValueError):
                 continue

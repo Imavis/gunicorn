@@ -115,7 +115,7 @@ class Worker(object):
 
         # Prevent fd inheritance
         [util.close_on_exec(s) for s in self.sockets]
-        util.close_on_exec(self.tmp.fileno())
+        [util.close_on_exec(fd) for fd in self.tmp.fileno()]
 
         self.wait_fds = self.sockets + [self.PIPE[0]]
 

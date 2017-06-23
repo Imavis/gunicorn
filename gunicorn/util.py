@@ -270,6 +270,17 @@ def set_non_blocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL) | os.O_NONBLOCK
     fcntl.fcntl(fd, fcntl.F_SETFL, flags)
 
+
+def read_nonblock(fd, n):
+    try:
+        return os.read(fd, n)
+    except OSError as err:
+        if err.errno == errno.EAGAIN or err.errno == errno.EWOULDBLOCK:
+            return ''
+        else:
+            raise
+
+
 def close(sock):
     try:
         sock.close()

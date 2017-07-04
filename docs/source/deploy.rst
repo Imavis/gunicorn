@@ -11,7 +11,7 @@ Although there are many HTTP proxies available, we strongly advise that you
 use Nginx_. If you choose another proxy server you need to make sure that it
 buffers slow clients when you use default Gunicorn workers. Without this
 buffering Gunicorn will be easily susceptible to denial-of-service attacks.
-You can use Boom_ to check if your proxy is behaving properly.
+You can use Hey_ to check if your proxy is behaving properly.
 
 An `example configuration`_ file for fast clients with Nginx_:
 
@@ -105,11 +105,11 @@ Monitoring
 ==========
 
 .. note::
-    Make sure that when using either of these service monitors you do not
-    enable the Gunicorn's daemon mode. These monitors expect that the process
-    they launch will be the process they need to monitor. Daemonizing
-    will fork-exec which creates an unmonitored process and generally just
-    confuses the monitor services.
+   Make sure that when using either of these service monitors you do not
+   enable the Gunicorn's daemon mode. These monitors expect that the process
+   they launch will be the process they need to monitor. Daemonizing will
+   fork-exec which creates an unmonitored process and generally just
+   confuses the monitor services.
 
 Gaffer
 ------
@@ -135,7 +135,7 @@ Create a ``Procfile`` in your project::
 
 You can launch any other applications that should be launched at the same time.
 
-Then you can start your Gunicorn application using Gaffer_.::
+Then you can start your Gunicorn application using Gaffer_::
 
     gaffer start
 
@@ -188,8 +188,10 @@ Another useful tool to monitor and control Gunicorn is Supervisor_. A
 
 Upstart
 -------
-Using Gunicorn with upstart is simple. In this example we will run the app "myapp"
-from a virtualenv. All errors will go to /var/log/upstart/myapp.log.
+
+Using Gunicorn with upstart is simple. In this example we will run the app
+"myapp" from a virtualenv. All errors will go to
+``/var/log/upstart/myapp.log``.
 
 **/etc/init/myapp.conf**::
 
@@ -208,10 +210,12 @@ from a virtualenv. All errors will go to /var/log/upstart/myapp.log.
 Systemd
 -------
 
-A tool that is starting to be common on linux systems is Systemd_. Here
-are configurations files to set the Gunicorn launch in systemd and
-the interfaces on which Gunicorn will listen. The sockets will be managed by
-systemd:
+A tool that is starting to be common on linux systems is Systemd_. Below are
+configurations files and instructions for using systemd to create a unix socket
+for incoming Gunicorn requests.  Systemd will listen on this socket and start
+gunicorn automatically in response to traffic.  Later in this section are 
+instructions for configuring Nginx to forward web traffic to the newly created
+unix socket:
 
 **/etc/systemd/system/gunicorn.service**::
 
@@ -224,8 +228,10 @@ systemd:
     PIDFile=/run/gunicorn/pid
     User=someuser
     Group=someuser
-    WorkingDirectory=/home/someuser
-    ExecStart=/home/someuser/gunicorn/bin/gunicorn --pid /run/gunicorn/pid test:app
+    RuntimeDirectory=gunicorn
+    WorkingDirectory=/home/someuser/applicationroot
+    ExecStart=/usr/bin/gunicorn --pid /run/gunicorn/pid   \
+              --bind unix:/run/gunicorn/socket applicationname.wsgi
     ExecReload=/bin/kill -s HUP $MAINPID
     ExecStop=/bin/kill -s TERM $MAINPID
     PrivateTmp=true
@@ -240,31 +246,60 @@ systemd:
 
     [Socket]
     ListenStream=/run/gunicorn/socket
-    ListenStream=0.0.0.0:9000
-    ListenStream=[::]:8000
 
     [Install]
     WantedBy=sockets.target
 
-**/usr/lib/tmpfiles.d/gunicorn.conf**::
+**/etc/tmpfiles.d/gunicorn.conf**::
 
-    d /run/gunicorn 0755 someuser someuser -
+    d /run/gunicorn 0755 someuser somegroup -
 
-Next enable the services so they autostart at boot::
+Next enable the socket so it autostarts at boot::
 
-    systemctl enable nginx.service
     systemctl enable gunicorn.socket
 
 Either reboot, or start the services manually::
 
-    systemctl start nginx.service
     systemctl start gunicorn.socket
 
 
-After running ``curl http://localhost:9000/``, Gunicorn should start and you
-should see something like that in logs::
+After running ``curl --unix-socket /run/gunicorn/socket http``, Gunicorn
+should start and you should see some HTML from your server in the terminal.
 
-    2013-02-19 23:48:19 [31436] [DEBUG] Socket activation sockets: unix:/run/gunicorn/socket,http://0.0.0.0:9000,http://[::]:8000
+You must now configure your web proxy to send traffic to the new Gunicorn
+socket. Edit your ``nginx.conf`` to include the following:
+
+**/etc/nginx/nginx.conf**::
+
+    ...
+    http {
+        server {
+            listen          8000;
+            server_name     127.0.0.1;
+            location / {
+                proxy_pass http://unix:/run/gunicorn/socket;
+            }
+        }
+    }
+    ...
+
+.. note::
+
+    The listen and server_name used here are configured for a local machine.
+    In a production server you will most likely listen on port 80,
+    and use your URL as the server_name.
+    
+Now make sure you enable the nginx service so it automatically starts at boot::
+
+    systemctl enable nginx.service
+    
+Either reboot, or start Nginx with the following command::
+
+    systemctl start nginx
+    
+Now you should be able to test Nginx with Gunicorn by visiting
+http://127.0.0.1:8000/ in any web browser. Systemd is now set up.
+
 
 Logging
 =======
@@ -276,12 +311,17 @@ utility::
 
     kill -USR1 $(cat /var/run/gunicorn.pid)
 
-.. note:: overriding the LOGGING dictionary requires to set `disable_existing_loggers: False`` to not interfere with the Gunicorn logging.
+.. note::
+   Overriding the ``LOGGING`` dictionary requires to set
+   ``disable_existing_loggers: False`` to not interfere with the Gunicorn
+   logging.
 
-.. warning:: Gunicorn error log is here to log errors from Gunicorn, not from another application.
+.. warning::
+   Gunicorn error log is here to log errors from Gunicorn, not from another
+   application.
 
 .. _Nginx: http://www.nginx.org
-.. _Boom: https://github.com/rakyll/boom
+.. _Hey: https://github.com/rakyll/hey
 .. _`example configuration`: http://github.com/benoitc/gunicorn/blob/master/examples/nginx.conf
 .. _runit: http://smarden.org/runit/
 .. _`example service`: http://github.com/benoitc/gunicorn/blob/master/examples/gunicorn_rc
@@ -291,4 +331,4 @@ utility::
 .. _`logging configuration file`: https://github.com/benoitc/gunicorn/blob/master/examples/logging.conf
 .. _Virtualenv: http://pypi.python.org/pypi/virtualenv
 .. _Systemd: http://www.freedesktop.org/wiki/Software/systemd
-.. _Gaffer <http://gaffer.readthedocs.org/en/latest/index.html>:
+.. _Gaffer <https://gaffer.readthedocs.io/en/latest/index.html>:

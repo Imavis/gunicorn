@@ -27,6 +27,8 @@ CLASSIFIERS = [
     'Programming Language :: Python :: 3.2',
     'Programming Language :: Python :: 3.3',
     'Programming Language :: Python :: 3.4',
+    'Programming Language :: Python :: 3.5',
+    'Programming Language :: Python :: 3.6',
     'Topic :: Internet',
     'Topic :: Utilities',
     'Topic :: Software Development :: Libraries :: Python Modules',
@@ -98,7 +100,6 @@ setup(
     entry_points="""
     [console_scripts]
     gunicorn=gunicorn.app.wsgiapp:run
-    gunicorn_django=gunicorn.app.djangoapp:run
     gunicorn_paster=gunicorn.app.pasterapp:run
 
     [paste.server_runner]

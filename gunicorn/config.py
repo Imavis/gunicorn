@@ -14,13 +14,16 @@ except ImportError:  # python 2.6
     from . import argparse_compat as argparse
 import os
 import pwd
+import re
 import ssl
 import sys
 import textwrap
+import shlex
 
 from gunicorn import __version__
 from gunicorn import _compat
 from gunicorn.errors import ConfigError
+from gunicorn.reloader import reloader_engines
 from gunicorn import six
 from gunicorn import util
 
@@ -45,6 +48,13 @@ def make_settings(ignore=None):
     return settings
 
 
+def auto_int(_, x):
+    if x.startswith('0') and not x.lower().startswith('0x'):
+        # for compatible with octal numbers in python3
+        x = x.replace('0', '0o', 1)
+    return int(x, 0)
+
+
 class Config(object):
 
     def __init__(self, usage=None, prog=None):
@@ -67,6 +77,11 @@ class Config(object):
         if name not in self.settings:
             raise AttributeError("No configuration setting for: %s" % name)
         self.settings[name].set(value)
+
+    def get_cmd_args_from_env(self):
+        if 'GUNICORN_CMD_ARGS' in self.env_orig:
+            return shlex.split(self.env_orig['GUNICORN_CMD_ARGS'])
+        return []
 
     def parser(self):
         kwargs = {
@@ -203,6 +218,25 @@ class Config(object):
 
         return True
 
+    @property
+    def paste_global_conf(self):
+        raw_global_conf = self.settings['raw_paste_global_conf'].get()
+        if raw_global_conf is None:
+            return None
+
+        global_conf = {}
+        for e in raw_global_conf:
+            s = _compat.bytes_to_str(e)
+            try:
+                k, v = re.split(r'(?<!\\)=', s, 1)
+            except ValueError:
+                raise RuntimeError("environment setting %r invalid" % s)
+            k = k.replace('\\=', '=')
+            v = v.replace('\\=', '=')
+            global_conf[k] = v
+
+        return global_conf
+
 
 class SettingMeta(type):
     def __new__(cls, name, bases, attrs):
@@ -334,6 +368,14 @@ def validate_string(val):
     return val.strip()
 
 
+def validate_file_exists(val):
+    if val is None:
+        return None
+    if not os.path.exists(val):
+        raise ValueError("File %s does not exists." % val)
+    return val
+
+
 def validate_list_string(val):
     if not val:
         return []
@@ -343,6 +385,10 @@ def validate_list_string(val):
         val = [val]
 
     return [validate_string(v) for v in val]
+
+
+def validate_list_of_existing_files(val):
+    return [validate_file_exists(v) for v in validate_list_string(val)]
 
 
 def validate_string_to_list(val):
@@ -443,22 +489,6 @@ def validate_chdir(val):
     return path
 
 
-def validate_file(val):
-    if val is None:
-        return None
-
-    # valid if the value is a string
-    val = validate_string(val)
-
-    # transform relative paths
-    path = os.path.abspath(os.path.normpath(os.path.join(util.getcwd(), val)))
-
-    # test if the path exists
-    if not os.path.exists(path):
-        raise ConfigError("%r not found" % val)
-
-    return path
-
 def validate_hostport(val):
     val = validate_string(val)
     if val is None:
@@ -468,6 +498,14 @@ def validate_hostport(val):
         return (elements[0], int(elements[1]))
     else:
         raise TypeError("Value must consist of: hostname:port")
+
+
+def validate_reload_engine(val):
+    if val not in reloader_engines:
+        raise ConfigError("Invalid reload_engine: %r" % val)
+
+    return val
+
 
 def get_default_config_file():
     config_path = os.path.join(os.path.abspath(os.getcwd()),
@@ -591,8 +629,7 @@ class WorkerClass(Setting):
         Optionally, you can provide your own worker by giving Gunicorn a
         Python path to a subclass of ``gunicorn.workers.base.Worker``.
         This alternative syntax will load the gevent class:
-        ``gunicorn.workers.ggevent.GeventWorker``. Alternatively, the syntax
-        can also load the gevent class with ``egg:gunicorn#gevent``.
+        ``gunicorn.workers.ggevent.GeventWorker``.
         """
 
 class WorkerThreads(Setting):
@@ -612,7 +649,9 @@ class WorkerThreads(Setting):
         You'll want to vary this a bit to find the best for your particular
         application's work load.
 
-        If it is not defined, the default is 1.
+        If it is not defined, the default is ``1``.
+
+        This setting only affects the Gthread worker type.
         """
 
 
@@ -773,8 +812,12 @@ class LimitRequestFieldSize(Setting):
     desc = """\
         Limit the allowed size of an HTTP request header field.
 
-        Value is a number from 0 (unlimited) to 8190. to set the limit
-        on the allowed size of an HTTP request header field.
+        Value is a positive number or 0. Setting it to 0 will allow unlimited
+        header field sizes.
+
+        .. warning::
+           Setting this parameter to a very high or unlimited value can open
+           up for DDOS attacks.
         """
 
 
@@ -785,6 +828,7 @@ class Reload(Setting):
     validator = validate_bool
     action = 'store_true'
     default = False
+
     desc = '''\
         Restart workers when code changes.
 
@@ -794,7 +838,51 @@ class Reload(Setting):
         The reloader is incompatible with application preloading. When using a
         paste configuration be sure that the server block does not import any
         application code or the reload will not work as designed.
+
+        The default behavior is to attempt inotify with a fallback to file
+        system polling. Generally, inotify should be preferred if available
+        because it consumes less system resources.
+
+        .. note::
+           In order to use the inotify reloader, you must have the ``inotify``
+           package installed.
         '''
+
+
+class ReloadEngine(Setting):
+    name = "reload_engine"
+    section = "Debugging"
+    cli = ["--reload-engine"]
+    meta = "STRING"
+    validator = validate_reload_engine
+    default = "auto"
+    desc = """\
+        The implementation that should be used to power :ref:`reload`.
+
+        Valid engines are:
+
+        * 'auto'
+        * 'poll'
+        * 'inotify' (requires inotify)
+
+        .. versionadded:: 19.7
+        """
+
+
+class ReloadExtraFiles(Setting):
+    name = "reload_extra_files"
+    action = "append"
+    section = "Debugging"
+    cli = ["--reload-extra-file"]
+    meta = "FILES"
+    validator = validate_list_of_existing_files
+    default = []
+    desc = """\
+        Extends :ref:`reload` option to also watch and reload on additional files
+        (e.g., templates, configurations, specifications, etc.).
+
+        .. versionadded:: 19.8
+        """
 
 
 class Spew(Setting):
@@ -814,7 +902,7 @@ class Spew(Setting):
 class ConfigCheck(Setting):
     name = "check_config"
     section = "Debugging"
-    cli = ["--check-config", ]
+    cli = ["--check-config"]
     validator = validate_bool
     action = "store_true"
     default = False
@@ -953,14 +1041,13 @@ class Group(Setting):
         change the worker processes group.
         """
 
-
 class Umask(Setting):
     name = "umask"
     section = "Server Mechanics"
     cli = ["-m", "--umask"]
     meta = "INT"
     validator = validate_pos_int
-    type = int
+    type = auto_int
     default = 0
     desc = """\
         A bit mask for the file mode on files written by Gunicorn.
@@ -971,6 +1058,23 @@ class Umask(Setting):
         with ``int(value, 0)`` (``0`` means Python guesses the base, so values
         like ``0``, ``0xFF``, ``0022`` are valid for decimal, hex, and octal
         representations)
+        """
+
+
+class Initgroups(Setting):
+    name = "initgroups"
+    section = "Server Mechanics"
+    cli = ["--initgroups"]
+    validator = validate_bool
+    action = 'store_true'
+    default = False
+
+    desc = """\
+        If true, set the worker process's group access list with all of the
+        groups of which the specified username is a member, plus the specified
+        group id.
+
+        .. versionadded:: 19.7
         """
 
 
@@ -1047,7 +1151,7 @@ class AccessLog(Setting):
     desc = """\
         The Access log file to write to.
 
-        ``'-'`` means log to stderr.
+        ``'-'`` means log to stdout.
         """
 
 
@@ -1061,30 +1165,31 @@ class AccessLogFormat(Setting):
     desc = """\
         The access log format.
 
-        ==========  ===========
-        Identifier  Description
-        ==========  ===========
-        h           remote address
-        l           ``'-'``
-        u           user name
-        t           date of the request
-        r           status line (e.g. ``GET / HTTP/1.1``)
-        m           request method
-        U           URL path without query string
-        q           query string
-        H           protocol
-        s           status
-        B           response length
-        b           response length or ``'-'`` (CLF format)
-        f           referer
-        a           user agent
-        T           request time in seconds
-        D           request time in microseconds
-        L           request time in decimal seconds
-        p           process ID
-        {Header}i   request header
-        {Header}o   response header
-        ==========  ===========
+        ===========  ===========
+        Identifier   Description
+        ===========  ===========
+        h            remote address
+        l            ``'-'``
+        u            user name
+        t            date of the request
+        r            status line (e.g. ``GET / HTTP/1.1``)
+        m            request method
+        U            URL path without query string
+        q            query string
+        H            protocol
+        s            status
+        B            response length
+        b            response length or ``'-'`` (CLF format)
+        f            referer
+        a            user agent
+        T            request time in seconds
+        D            request time in microseconds
+        L            request time in decimal seconds
+        p            process ID
+        {Header}i    request header
+        {Header}o    response header
+        {Variable}e  environment variable
+        ===========  ===========
         """
 
 
@@ -1153,10 +1258,8 @@ class LoggerClass(Setting):
         The default class (``gunicorn.glogging.Logger``) handle most of
         normal usages in logging. It provides error and access logging.
 
-        You can provide your own worker by giving Gunicorn a
+        You can provide your own logger by giving Gunicorn a
         Python path to a subclass like ``gunicorn.glogging.Logger``.
-        Alternatively the syntax can also load the Logger class
-        with ``egg:gunicorn#simple``.
         """
 
 
@@ -1315,23 +1418,6 @@ class DefaultProcName(Setting):
     default = "gunicorn"
     desc = """\
         Internal setting that is adjusted for each type of application.
-        """
-
-
-class DjangoSettings(Setting):
-    name = "django_settings"
-    section = "Django"
-    cli = ["--settings"]
-    meta = "STRING"
-    validator = validate_string
-    default = None
-    desc = """\
-        The Python path to a Django settings module. (deprecated)
-
-        e.g. ``myproject.settings.main``. If this isn't provided, the
-        ``DJANGO_SETTINGS_MODULE`` environment variable will be used.
-
-        **DEPRECATED**: use the ``--env`` argument instead.
         """
 
 
@@ -1554,6 +1640,25 @@ class PostRequest(Setting):
         """
 
 
+class ChildExit(Setting):
+    name = "child_exit"
+    section = "Server Hooks"
+    validator = validate_callable(2)
+    type = six.callable
+
+    def child_exit(server, worker):
+        pass
+    default = staticmethod(child_exit)
+    desc = """\
+        Called just after a worker has been exited, in the master process.
+
+        The callable needs to accept two instance variables for the Arbiter and
+        the just-exited Worker.
+
+        .. versionadded:: 19.7
+        """
+
+
 class WorkerExit(Setting):
     name = "worker_exit"
     section = "Server Hooks"
@@ -1564,7 +1669,7 @@ class WorkerExit(Setting):
         pass
     default = staticmethod(worker_exit)
     desc = """\
-        Called just after a worker has been exited.
+        Called just after a worker has been exited, in the worker process.
 
         The callable needs to accept two instance variables for the Arbiter and
         the just-exited Worker.
@@ -1675,9 +1780,13 @@ class SSLVersion(Setting):
     section = "SSL"
     cli = ["--ssl-version"]
     validator = validate_pos_int
-    default = ssl.PROTOCOL_TLSv1
+    default = ssl.PROTOCOL_SSLv23
     desc = """\
     SSL version to use (see stdlib ssl module's)
+
+    .. versionchanged:: 19.7
+       The default value has been changed from ``ssl.PROTOCOL_TLSv1`` to
+       ``ssl.PROTOCOL_SSLv23``.
     """
 
 class CertReqs(Setting):
@@ -1733,4 +1842,26 @@ if sys.version_info >= (2, 7):
         default = 'TLSv1'
         desc = """\
         Ciphers to use (see stdlib ssl module's)
+        """
+
+
+class PasteGlobalConf(Setting):
+    name = "raw_paste_global_conf"
+    action = "append"
+    section = "Server Mechanics"
+    cli = ["--paste-global"]
+    meta = "CONF"
+    validator = validate_list_string
+    default = []
+
+    desc = """\
+        Set a PasteDeploy global config variable in ``key=value`` form.
+
+        The option can be specified multiple times.
+
+        The variables are passed to the the PasteDeploy entrypoint. Example::
+
+            $ gunicorn -b 127.0.0.1:8000 --paste development.ini --paste-global FOO=1 --paste-global BAR=2
+
+        .. versionadded:: 19.7
         """

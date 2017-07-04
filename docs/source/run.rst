@@ -13,6 +13,8 @@ Commands
 After installing Gunicorn you will have access to the command line script
 ``gunicorn``.
 
+.. _gunicorn-cmd:
+
 gunicorn
 --------
 
@@ -63,6 +65,9 @@ Commonly Used Arguments
 * ``-n APP_NAME, --name=APP_NAME`` - If setproctitle_ is installed you can
   adjust the name of Gunicorn process as they appear in the process system
   table (which affects tools like ``ps`` and ``top``).
+
+Settings can be specified by using environment variable
+:ref:`GUNICORN_CMD_ARGS <settings>`.
 
 See :ref:`configuration` and :ref:`settings` for detailed usage.
 

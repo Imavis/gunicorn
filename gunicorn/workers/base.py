@@ -12,9 +12,10 @@ import sys
 import time
 import traceback
 
+from gunicorn import six
 from gunicorn import util
 from gunicorn.workers.workertmp import WorkerTmp
-from gunicorn.reloader import Reloader
+from gunicorn.reloader import reloader_engines
 from gunicorn.http.errors import (
     InvalidHeader, InvalidHeaderName, InvalidRequestLine, InvalidRequestMethod,
     InvalidHTTPVersion, LimitRequestLine, LimitRequestHeaders,
@@ -38,6 +39,7 @@ class Worker(object):
         changes you'll want to do that in ``self.init_process()``.
         """
         self.age = age
+        self.pid = "[booting]"
         self.ppid = ppid
         self.sockets = sockets
         self.app = app
@@ -56,10 +58,6 @@ class Worker(object):
 
     def __str__(self):
         return "<Worker %s>" % self.pid
-
-    @property
-    def pid(self):
-        return os.getpid()
 
     def notify(self):
         """\
@@ -85,24 +83,13 @@ class Worker(object):
         loop is initiated.
         """
 
-        # start the reloader
-        if self.cfg.reload:
-            def changed(fname):
-                self.log.info("Worker reloading: %s modified", fname)
-                self.alive = False
-                self.cfg.worker_int(self)
-                time.sleep(0.1)
-                sys.exit(0)
-
-            self.reloader = Reloader(callback=changed)
-            self.reloader.start()
-
         # set environment' variables
         if self.cfg.env:
             for k, v in self.cfg.env.items():
                 os.environ[k] = v
 
-        util.set_owner_process(self.cfg.uid, self.cfg.gid)
+        util.set_owner_process(self.cfg.uid, self.cfg.gid,
+                               initgroups=self.cfg.initgroups)
 
         # Reseed the random number generator
         util.seed()
@@ -123,8 +110,21 @@ class Worker(object):
 
         self.init_signals()
 
-        self.load_wsgi()
+        # start the reloader
+        if self.cfg.reload:
+            def changed(fname):
+                self.log.info("Worker reloading: %s modified", fname)
+                self.alive = False
+                self.cfg.worker_int(self)
+                time.sleep(0.1)
+                sys.exit(0)
 
+            reloader_cls = reloader_engines[self.cfg.reload_engine]
+            self.reloader = reloader_cls(extra_files=self.cfg.reload_extra_files,
+                                         callback=changed)
+            self.reloader.start()
+
+        self.load_wsgi()
         self.cfg.post_worker_init(self)
 
         # Enter main run loop
@@ -135,7 +135,7 @@ class Worker(object):
         try:
             self.wsgi = self.app.wsgi()
         except SyntaxError as e:
-            if not self.cfg.reload:
+            if self.cfg.reload == 'off':
                 raise
 
             self.log.exception(e)
@@ -148,8 +148,9 @@ class Worker(object):
                 exc_type, exc_val, exc_tb = sys.exc_info()
                 self.reloader.add_extra_file(exc_val.filename)
 
-                tb_string = traceback.format_tb(exc_tb)
-                self.wsgi = util.make_fail_app(tb_string)
+                tb_string = six.StringIO()
+                traceback.print_tb(exc_tb, file=tb_string)
+                self.wsgi = util.make_fail_app(tb_string.getvalue())
             finally:
                 del exc_tb
 

@@ -10,7 +10,7 @@ WSGI Bits
 How do I set SCRIPT_NAME?
 -------------------------
 
-By default ``SCRIPT_NAME`` is an empy string. The value could be set by
+By default ``SCRIPT_NAME`` is an empty string. The value could be set by
 setting ``SCRIPT_NAME`` in the environment or as an HTTP header.
 
 
@@ -27,10 +27,10 @@ You can gracefully reload by sending HUP signal to gunicorn::
 How might I test a proxy configuration?
 ---------------------------------------
 
-The Boom_ program is a great way to test that your proxy is correctly
+The Hey_ program is a great way to test that your proxy is correctly
 buffering responses for the synchronous workers::
 
-    $ boom -n 10000 -c 100 http://127.0.0.1:5000/
+    $ hey -n 10000 -c 100 http://127.0.0.1:5000/
 
 This runs a benchmark of 10000 requests with 100 running concurrently.
 
@@ -51,7 +51,7 @@ HTTP/1.0 with its upstream servers. If you want to deploy Gunicorn to
 handle unbuffered requests (ie, serving requests directly from the internet)
 you should use one of the async workers.
 
-.. _Boom: https://github.com/rakyll/boom
+.. _Hey: https://github.com/rakyll/hey
 .. _setproctitle: http://pypi.python.org/pypi/setproctitle
 .. _proc_name: settings.html#proc-name
 
@@ -67,7 +67,7 @@ Read the :ref:`design` page for help on the various worker types.
 What types of workers are there?
 --------------------------------
 
-Check out the configuration docs for worker_class_
+Check out the configuration docs for worker_class_.
 
 How can I figure out the best number of worker processes?
 ---------------------------------------------------------
@@ -94,11 +94,11 @@ Does Gunicorn suffer from the thundering herd problem?
 The thundering herd problem occurs when many sleeping request handlers, which
 may be either threads or processes, wake up at the same time to handle a new
 request. Since only one handler will receive the request, the others will have
-been awakened for no reason, wasting CPU cycles. At this time, Gunicorn does not
-implement any IPC solution for coordinating between worker processes. You may
-experience high load due to this problem when using many workers or threads.
-However `a work has been started <https://github.com/benoitc/gunicorn/issues/792>`_
-to remove this issue.
+been awakened for no reason, wasting CPU cycles. At this time, Gunicorn does
+not implement any IPC solution for coordinating between worker processes. You
+may experience high load due to this problem when using many workers or
+threads. However `a work has been started
+<https://github.com/benoitc/gunicorn/issues/792>`_ to remove this issue.
 
 .. _worker_class: settings.html#worker-class
 .. _`number of workers`: design.html#how-many-workers
@@ -113,8 +113,8 @@ In version R20, Gunicorn logs to the console by default again.
 Kernel Parameters
 =================
 
-When dealing with large numbers of concurrent connections there are a handful of
-kernel parameters that you might need to adjust. Generally these should only
+When dealing with large numbers of concurrent connections there are a handful
+of kernel parameters that you might need to adjust. Generally these should only
 affect sites with a very large concurrent load. These parameters are not
 specific to Gunicorn, they would apply to any sort of network server you may be
 running.
@@ -137,8 +137,8 @@ How can I increase the maximum socket backlog?
 ----------------------------------------------
 
 Listening sockets have an associated queue of incoming connections that are
-waiting to be accepted. If you happen to have a stampede of clients that fill up
-this queue new connections will eventually start getting dropped.
+waiting to be accepted. If you happen to have a stampede of clients that fill
+up this queue new connections will eventually start getting dropped.
 
 ::
 
@@ -160,3 +160,40 @@ How do I fix Django reporting an ``ImproperlyConfigured`` error?
 
 With asynchronous workers, creating URLs with the ``reverse`` function of
 ``django.core.urlresolvers`` may fail. Use ``reverse_lazy`` instead.
+
+.. _blocking-os-fchmod:
+
+How do I avoid Gunicorn excessively blocking in ``os.fchmod``?
+--------------------------------------------------------------
+
+The current heartbeat system involves calling ``os.fchmod`` on temporary file
+handlers and may block a worker for arbitrary time if the directory is on a
+disk-backed filesystem. For example, by default ``/tmp`` is not mounted as
+``tmpfs`` in Ubuntu; in AWS an EBS root instance volume may sometimes hang for
+half a minute and during this time Gunicorn workers may completely block in
+``os.fchmod``. ``os.fchmod`` may introduce extra delays if the disk gets full.
+Also Gunicon may refuse to start if it can't create the files when the disk is
+full.
+
+Currently to avoid these problems you can create a ``tmpfs`` mount (for a new
+directory or for ``/tmp``) and pass its path to ``--worker-tmp-dir``. First,
+check whether your ``/tmp`` is disk-backed or RAM-backed::
+
+    $ df /tmp
+    Filesystem     1K-blocks    Used Available Use% Mounted on
+    /dev/xvda1           ...     ...       ...  ... /
+
+No luck. Let's create a new ``tmpfs`` mount::
+
+    sudo cp /etc/fstab /etc/fstab.orig
+    sudo mkdir /mem
+    echo 'tmpfs       /mem tmpfs defaults,size=64m,mode=1777,noatime,comment=for-gunicorn 0 0' | sudo tee -a /etc/fstab
+    sudo mount /mem
+
+Check the result::
+
+    $ df /mem
+    Filesystem     1K-blocks  Used Available Use% Mounted on
+    tmpfs              65536     0     65536   0% /mem
+
+Now you can set ``--worker-tmp-dir /mem``.

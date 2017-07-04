@@ -212,7 +212,7 @@ class Logger(object):
         # set gunicorn.access handler
         if cfg.accesslog is not None:
             self._set_handler(self.access_log, cfg.accesslog,
-                fmt=logging.Formatter(self.access_fmt))
+                fmt=logging.Formatter(self.access_fmt), stream=sys.stdout)
 
         # set syslog handler
         if cfg.syslog:
@@ -303,6 +303,10 @@ class Logger(object):
         # add response headers
         atoms.update(dict([("{%s}o" % k.lower(), v) for k, v in resp_headers]))
 
+        # add environ variables
+        environ_variables = environ.items()
+        atoms.update(dict([("{%s}e" % k.lower(), v) for k, v in environ_variables]))
+
         return atoms
 
     def access(self, resp, req, environ, request_time):
@@ -369,7 +373,7 @@ class Logger(object):
             if getattr(h, "_gunicorn", False):
                 return h
 
-    def _set_handler(self, log, output, fmt):
+    def _set_handler(self, log, output, fmt, stream=None):
         # remove previous gunicorn log handler
         h = self._get_gunicorn_handler(log)
         if h:
@@ -377,7 +381,7 @@ class Logger(object):
 
         if output is not None:
             if output == "-":
-                h = logging.StreamHandler()
+                h = logging.StreamHandler(stream)
             else:
                 util.check_is_writeable(output)
                 h = logging.FileHandler(output)

@@ -7,15 +7,12 @@ from __future__ import print_function
 
 import email.utils
 import fcntl
-import grp
 import io
 import os
 import pkg_resources
 import pwd
 import random
-import resource
 import socket
-import stat
 import sys
 import textwrap
 import time
@@ -24,19 +21,13 @@ import inspect
 import errno
 import warnings
 import cgi
+import logging
 
 from gunicorn.errors import AppImportError
 from gunicorn.six import text_type
 from gunicorn.workers import SUPPORTED_WORKERS
 
-MAXFD = 1024
 REDIRECT_TO = getattr(os, 'devnull', '/dev/null')
-
-timeout_default = object()
-
-CHUNK_SIZE = (16 * 1024)
-
-MAX_BODY = 1024 * 132
 
 # Server and Date aren't technically hop-by-hop
 # headers, but they are in the purview of the
@@ -54,6 +45,7 @@ hop_headers = set("""
 
 try:
     from setproctitle import setproctitle
+
     def _setproctitle(title):
         setproctitle("gunicorn: %s" % title)
 except ImportError:
@@ -147,13 +139,30 @@ def load_class(uri, default="gunicorn.workers.sync.SyncWorker",
         return getattr(mod, klass)
 
 
-def set_owner_process(uid, gid):
+def get_username(uid):
+    """ get the username for a user id"""
+    return pwd.getpwuid(uid).pw_name
+
+
+def set_owner_process(uid, gid, initgroups=False):
     """ set user and group of workers processes """
+
     if gid:
+        if uid:
+            try:
+                username = get_username(uid)
+            except KeyError:
+                initgroups = False
+
         # versions of python < 2.6.2 don't manage unsigned int for
         # groups like on osx or fedora
         gid = abs(gid) & 0x7FFFFFFF
-        os.setgid(gid)
+
+        if initgroups:
+            os.initgroups(username, gid)
+        else:
+            os.setgid(gid)
+
     if uid:
         os.setuid(uid)
 
@@ -253,12 +262,6 @@ def parse_address(netloc, default_port=8000):
         port = default_port
     return (host, port)
 
-def get_maxfd():
-    maxfd = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
-    if (maxfd == resource.RLIM_INFINITY):
-        maxfd = MAXFD
-    return maxfd
-
 
 def close_on_exec(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFD)
@@ -325,11 +328,6 @@ def write_nonblock(sock, data, chunked=False):
         return write(sock, data, chunked)
 
 
-def writelines(sock, lines, chunked=False):
-    for line in list(lines):
-        write(sock, line, chunked)
-
-
 def write_error(sock, status_int, reason, mesg):
     html = textwrap.dedent("""\
     <html>
@@ -353,10 +351,6 @@ def write_error(sock, status_int, reason, mesg):
     write_nonblock(sock, http.encode('latin1'))
 
 
-def normalize_name(name):
-    return "-".join([w.lower().capitalize() for w in name.split("-")])
-
-
 def import_app(module):
     parts = module.split(":", 1)
     if len(parts) == 1:
@@ -375,9 +369,12 @@ def import_app(module):
 
     mod = sys.modules[module]
 
+    is_debug = logging.root.level == logging.DEBUG
     try:
-        app = eval(obj, mod.__dict__)
+        app = eval(obj, vars(mod))
     except NameError:
+        if is_debug:
+            traceback.print_exception(*sys.exc_info())
         raise AppImportError("Failed to find application: %r" % module)
 
     if app is None:
@@ -548,6 +545,7 @@ def warn(msg):
 
 
 def make_fail_app(msg):
+    msg = to_bytestring(msg)
 
     def app(environ, start_response):
         start_response("500 Internal Server Error", [

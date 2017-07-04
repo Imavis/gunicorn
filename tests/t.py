@@ -10,8 +10,8 @@ import tempfile
 dirname = os.path.dirname(__file__)
 
 from gunicorn.http.parser import RequestParser
-from gunicorn.config import Config
 from gunicorn.six import BytesIO
+
 
 def data_source(fname):
     buf = BytesIO()
@@ -20,6 +20,7 @@ def data_source(fname):
             line = line.rstrip("\n").replace("\\r\\n", "\r\n")
             buf.write(line.encode('latin1'))
         return buf
+
 
 class request(object):
     def __init__(self, name):
@@ -64,16 +65,3 @@ class FakeSocket(object):
 
     def seek(self, offset, whence=0):
         self.tmp.seek(offset, whence)
-
-
-class http_request(object):
-    def __init__(self, name):
-        self.fname = os.path.join(dirname, "requests", name)
-
-    def __call__(self, func):
-        def run():
-            fsock = FakeSocket(data_source(self.fname))
-            req = Request(Config(), fsock, ('127.0.0.1', 6000), ('127.0.0.1', 8000))
-            func(req)
-        run.func_name = func.func_name
-        return run

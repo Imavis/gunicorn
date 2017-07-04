@@ -1,12 +1,17 @@
-=========
-Changelog
-=========
+================
+Changelog - 2017
+================
+
+.. note::
+
+   Please see :doc:`news` for the latest changes
 
 19.7.1 / 2017/03/21
 ===================
 
 - fix: continue if SO_REUSEPORT seems to be available but fails (:issue:`1480`)
 - fix: support non-decimal values for the umask command line option (:issue:`1325`)
+
 
 19.7.0 / 2017/03/01
 ===================
@@ -32,7 +37,7 @@ Changelog
 - format boot tracebacks properly with reloader (:issue:`1408`)
 - refactor socket activation and fd inheritance for better support of SystemD (:issue:`1310`)
 - fix: o fds are given by default in gunicorn (:issue:`1423`)
-- add ability to pass settings to GUNICORN_CMD_ARGS environnement variable which helps in container world (:issue:`1385`)
+- add ability to pass settings to GUNICORN_CMD_ARGS environment variable which helps in container world (:issue:`1385`)
 - fix:  catch access denied to pid file (:issue:`1091`)
 -  many additions and improvements to the documentation
 
@@ -40,18 +45,3 @@ Breaking Change
 +++++++++++++++
 
 - **Python 2.6.0** is the last supported version
-
-History
-=======
-
-.. toctree::
-   :titlesonly:
-
-   2017-news
-   2016-news
-   2015-news
-   2014-news
-   2013-news
-   2012-news
-   2011-news
-   2010-news

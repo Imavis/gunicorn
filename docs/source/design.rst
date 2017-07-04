@@ -65,17 +65,19 @@ The worker `gaiohttp` is a full asyncio worker using aiohttp_.
 Choosing a Worker Type
 ======================
 
-The default synchronous workers assume that your application is resource bound
+The default synchronous workers assume that your application is resource-bound
 in terms of CPU and network bandwidth. Generally this means that your
-application shouldn't do anything that takes an undefined amount of time. For
-instance, a request to the internet meets this criteria. At some point the
-external network will fail in such a way that clients will pile up on your
-servers.
+application shouldn't do anything that takes an undefined amount of time. An
+example of something that takes an undefined amount of time is a request to the
+internet. At some point the external network will fail in such a way that
+clients will pile up on your servers. So, in this sense, any web application
+which makes outgoing requests to APIs will benefit from an asynchronous worker.
 
-This resource bound assumption is why we require a buffering proxy in front of a
-default configuration Gunicorn. If you exposed synchronous workers to the
+This resource bound assumption is why we require a buffering proxy in front of
+a default configuration Gunicorn. If you exposed synchronous workers to the
 internet, a DOS attack would be trivial by creating a load that trickles data to
-the servers. For the curious, Boom_ is an example of this type of load.
+the servers. For the curious, Hey_ is an example of this type of load.
+
 
 Some examples of behavior requiring asynchronous workers:
 
@@ -104,30 +106,31 @@ optimal number of workers. Our recommendation is to start with the above guess
 and tune using TTIN and TTOU signals while the application is under load.
 
 Always remember, there is such a thing as too many workers. After a point your
-worker processes will start thrashing system resources decreasing the throughput
-of the entire system.
+worker processes will start thrashing system resources decreasing the
+throughput of the entire system.
 
 How Many Threads?
 ===================
 
 Since Gunicorn 19, a threads option can be used to process requests in multiple
-threads. Using threads assumes use of the sync worker. One benefit from threads
+threads. Using threads assumes use of the gthread worker. One benefit from threads
 is that requests can take longer than the worker timeout while notifying the
 master process that it is not frozen and should not be killed. Depending on the
 system, using multiple threads, multiple worker processes, or some mixture, may
 yield the best results. For example, CPython may not perform as well as Jython
 when using threads, as threading is implemented differently by each. Using
 threads instead of processes is a good way to reduce the memory footprint of
-Gunicorn, while still allowing for application upgrades using the reload signal,
-as the application code will be shared among workers but loaded only in the
-worker processes (unlike when using the preload setting, which loads the code in
-the master process).
+Gunicorn, while still allowing for application upgrades using the reload
+signal, as the application code will be shared among workers but loaded only in
+the worker processes (unlike when using the preload setting, which loads the
+code in the master process).
 
-.. note:: Under Python 2.x, uou need to install the 'futures' package to use
-   this feature.
+.. note::
+   Under Python 2.x, you need to install the 'futures' package to use this 
+   feature.
 
 .. _Greenlets: https://github.com/python-greenlet/greenlet
 .. _Eventlet: http://eventlet.net
 .. _Gevent: http://gevent.org
-.. _Boom: http://ha.ckers.org/slowloris/
+.. _Hey: https://github.com/rakyll/hey
 .. _aiohttp: https://github.com/KeepSafe/aiohttp

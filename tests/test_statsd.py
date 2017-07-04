@@ -1,8 +1,5 @@
 from datetime import timedelta
 import socket
-
-import t
-
 import logging
 import tempfile
 import shutil
@@ -62,6 +59,7 @@ def test_statsd_fail():
     logger.warning("No impact on logging")
     logger.exception("No impact on logging")
 
+
 def test_instrument():
     logger = Statsd(Config())
     # Capture logged messages
@@ -96,6 +94,7 @@ def test_instrument():
     assert logger.sock.msgs[1] == b"gunicorn.requests:1|c|@1.0"
     assert logger.sock.msgs[2] == b"gunicorn.request.status.200:1|c|@1.0"
 
+
 def test_prefix():
     c = Config()
     c.set("statsd_prefix", "test.")
@@ -104,6 +103,7 @@ def test_prefix():
 
     logger.info("Blah", extra={"mtype": "gauge", "metric": "gunicorn.test", "value": 666})
     assert logger.sock.msgs[0] == b"test.gunicorn.test:666|g"
+
 
 def test_prefix_no_dot():
     c = Config()
@@ -114,6 +114,7 @@ def test_prefix_no_dot():
     logger.info("Blah", extra={"mtype": "gauge", "metric": "gunicorn.test", "value": 666})
     assert logger.sock.msgs[0] == b"test.gunicorn.test:666|g"
 
+
 def test_prefix_multiple_dots():
     c = Config()
     c.set("statsd_prefix", "test...")
@@ -122,6 +123,7 @@ def test_prefix_multiple_dots():
 
     logger.info("Blah", extra={"mtype": "gauge", "metric": "gunicorn.test", "value": 666})
     assert logger.sock.msgs[0] == b"test.gunicorn.test:666|g"
+
 
 def test_prefix_nested():
     c = Config()

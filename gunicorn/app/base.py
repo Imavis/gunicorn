@@ -100,7 +100,7 @@ class Application(BaseApplication):
         return cfg
 
     def get_config_from_module_name(self, module_name):
-        return util.import_module(module_name).__dict__
+        return vars(util.import_module(module_name))
 
     def load_config_from_module_name_or_filename(self, location):
         """
@@ -154,9 +154,20 @@ class Application(BaseApplication):
             if default_config is not None:
                 self.load_config_from_file(default_config)
 
+        # Load up environment configuration
+        env_vars = self.cfg.get_cmd_args_from_env()
+        if env_vars:
+            env_args = parser.parse_args(env_vars)
+            for k, v in vars(env_args).items():
+                if v is None:
+                    continue
+                if k == "args":
+                    continue
+                self.cfg.set(k.lower(), v)
+
         # Lastly, update the configuration with any command line
         # settings.
-        for k, v in args.__dict__.items():
+        for k, v in vars(args).items():
             if v is None:
                 continue
             if k == "args":
